@@ -1,0 +1,3 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_mssql_connector,access_mssql_connector,model_mssql_connector,account.group_account_manager,1,1,1,1
+access_mssql_connector_log,access_mssql_connector_log,model_mssql_connector_log,account.group_account_manager,1,1,1,1

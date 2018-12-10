@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data>
+        <record id="connector_config_form_view" model="ir.ui.view">
+            <field name="name">connector.config.form.view</field>
+            <field name="model">mssql.connector</field>
+            <field name="arch" type="xml"> 
+                <form>
+                    <sheet>
+                        <div class="oe_button_box" name="button_box">
+                            <button name="run_connector" type="object" string="Connect" icon="fa-refresh" class="oe_stat_button" context="{'raise_error':True}"
+                                        attrs="{'invisible':[('active','=',False)]}"/>
+                            <button name="toggle_active" type="object" class="oe_stat_button" icon="fa-archive">
+                                <field name="active" widget="boolean_button"/>
+                            </button>
+                        </div>
+                        <group string="Connection Information">
+                            <group >  
+                                <field name='host'/>
+                                <field name='db_name'/>
+                            </group>
+                            <group>  
+                                <field name='model_name'/>
+                            </group>
+                        </group>
+                        <group string="Security and Authentication">
+                            <group >  
+                                <field name='username'/>
+                                <field name='password' password="True"/>
+                                <button name="test_mssql_connection" type="object" string="Test Connection" icon="fa-television"/>
+
+                            </group>
+                        </group>
+                    </sheet>
+                </form>
+            </field>  
+        </record>
+
+        <record id="connector_config_tree_view" model="ir.ui.view">
+            <field name="name">connector_config_tree_view</field>
+            <field name="model">mssql.connector</field>
+            <field name="arch" type="xml">
+                <tree string='MSSQL Connector'>
+                    <field name='model_name'/>
+                    <field name='db_name'/>
+                </tree>
+            </field>
+        </record>
+
+
+        <record id='action_connector_config' model='ir.actions.act_window'>
+            <field name='name'>MSSQL Connector</field>
+            <field name="type">ir.actions.act_window</field>
+            <field name='res_model'>mssql.connector</field>
+            <field name="view_mode">tree,form</field>
+        </record>
+
+        <record id="connector_log_tree_view" model="ir.ui.view">
+            <field name="name">connector_log_tree_view</field>
+            <field name="model">mssql.connector.log</field>
+            <field name="arch" type="xml">
+                <tree string='Log' create="false" edit="false" delete="false">
+                    <field name='date'/>
+                    <field name='connector_id'/>
+                </tree>
+            </field>
+        </record>
+
+        <record id="connector_log_form_view" model="ir.ui.view">
+            <field name="name">connector.log.form.view</field>
+            <field name="model">mssql.connector.log</field>
+            <field name="arch" type="xml">
+                <form create="false" edit="false" delete="false">
+                    <sheet>
+                        <group>
+                            <group >  
+                                <field name='date'/>
+                                <field name='model_name'/>
+                                <field name='db_name'/>
+                            </group>
+                            <group>  
+                                <field name='connector_id'/>
+                            </group>
+                        </group>
+                        <group col="2" string="Log">
+                            <field name='log' nolabel ="1"/>
+                        </group>
+                    </sheet>
+                </form>
+            </field>  
+        </record>
+
+
+
+        <record id='action_connector_log' model='ir.actions.act_window'>
+            <field name='name'>Log</field>
+            <field name="type">ir.actions.act_window</field>
+            <field name='res_model'>mssql.connector.log</field>
+            <field name="view_mode">tree,form</field>
+        </record>
+
+        <menuitem name="MSSQL Connectivity" id="menu_mssql_connector_config" parent="account.menu_finance_configuration"
+                  sequence="1" />
+        <menuitem name="Connectors" id="menu_connector_config" parent="mssql_connector.menu_mssql_connector_config"
+                  sequence="5" action="action_connector_config"/>
+        <menuitem name="Log" id="menu_connector_log" parent="mssql_connector.menu_mssql_connector_config"
+                  sequence="10" action="action_connector_log" groups="base.group_no_one"/>
+    </data>
+</odoo>
