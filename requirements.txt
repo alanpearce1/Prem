@@ -1,1 +1,3 @@
+Cython==0.29.1
 pymssql==2.1.3
+ 
