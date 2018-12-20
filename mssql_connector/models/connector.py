@@ -165,13 +165,13 @@ class MSSQLConnector(models.Model):
                 line_data['price_unit'] = data.get('PRICE', 0.0)
 
             # currency conversion
-            if invoice_data.get('currency_id') and data.get('PRICE') and invoice_data.get('date_invoice'):
-                currency = self.env['res.currency'].browse([invoice_data.get('currency_id')])
-                if company.currency_id != currency:   
-                    currency_rate = currency.with_context({'date':invoice_data.get('date_invoice')}).rate
-                    if currency_rate != data.get('CURRENCY_RATE'):
-                        currency_rate = data.get('CURRENCY_RATE')             
-                    line_data['price_unit'] = data.get('PRICE', 0.0) * currency_rate
+#            if invoice_data.get('currency_id') and data.get('PRICE') and invoice_data.get('date_invoice'):
+#                currency = self.env['res.currency'].browse([invoice_data.get('currency_id')])
+#                if company.currency_id != currency:   
+#                    currency_rate = currency.with_context({'date':invoice_data.get('date_invoice')}).rate
+#                    if currency_rate != data.get('CURRENCY_RATE'):
+#                        currency_rate = data.get('CURRENCY_RATE')             
+#                    line_data['price_unit'] = data.get('PRICE', 0.0) * currency_rate
 
             if line_data:
                 invoice_data['invoice_line_ids'] = [(0, 0, line_data)]
@@ -207,7 +207,7 @@ class MSSQLConnector(models.Model):
                 cursor.execute(query)
                 conn.commit()
         except Exception as e:
-            self.register_log(msg='%: %' %(trans_id, e))           
+            self.register_log(msg='%s: %s' %(trans_id, e))           
 
     @api.multi
     def run_connector(self):
@@ -246,7 +246,7 @@ class MSSQLConnector(models.Model):
                                         rec.company_id.id==invoice.company_id.id and rec.name==invoice.date_invoice)
                             if currency_rate and currency_rate.rate != data.get('CURRENCY_RATE'):
                                 currency_rate.rate = data.get('CURRENCY_RATE')
-                            else:
+                            elif not currency_rate :
                                 CurrencyRateObj.create({
                                                         'name':invoice.date_invoice,
                                                         'currency_id':invoice.currency_id.id,
