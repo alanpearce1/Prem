@@ -216,7 +216,7 @@ class MSSQLConnector(models.Model):
         '''
         InvoiceObj = self.env['account.invoice']
         CurrencyRateObj = self.env['res.currency.rate']
-        for connector in self:
+        for connector in self.sudo():
             connection = False
             try:
                 connection = pymssql.connect(connector.host, connector.username, connector.password, connector.db_name)
@@ -238,6 +238,7 @@ class MSSQLConnector(models.Model):
                     vals = (connector.model_name, invoice_data.get('error_msg'), data.get('TRANS_ID'))
                     update_query  = "UPDATE %s set ODOO_READ_SUCCESS=0, ODOO_ERROR_MESSAGE='%s' where TRANS_ID=%s" %vals
                     connector.execute_update_query(connection, cursor, update_query, data.get('TRANS_ID'))
+                    connector.register_log(msg='TRANS_ID :%s  Msg: %s' %(data.get('TRANS_ID'), invoice_data.get('error_msg')))
                 elif invoice_vals and data.get('TRANS_ID'):
                     try:
                         invoice = InvoiceObj.create(invoice_vals)
