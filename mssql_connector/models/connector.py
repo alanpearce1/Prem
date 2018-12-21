@@ -5,6 +5,7 @@ from odoo.tools import DEFAULT_SERVER_DATETIME_FORMAT,DEFAULT_SERVER_DATE_FORMAT
 from odoo.exceptions import UserError
 from datetime import datetime
 import pymssql
+import logging
 
 
 class MSSQLConnectorLog(models.Model):
@@ -207,7 +208,7 @@ class MSSQLConnector(models.Model):
                 cursor.execute(query)
                 conn.commit()
         except Exception as e:
-            self.register_log(msg='%s: %s' %(trans_id, e))           
+            self.register_log(msg='TRANS_ID :%s,  Msg: %s, Query: %s' %(trans_id, e, query))
 
     @api.multi
     def run_connector(self):
@@ -260,6 +261,7 @@ class MSSQLConnector(models.Model):
                         success_query = "UPDATE %s set ODOO_READ_SUCCESS=1, ODOO_IS_READ=1, ODOO_IS_READ_ON='%s', ODOO_JOURNAL_REF='%s',ODOO_ERROR_MESSAGE='' where TRANS_ID=%s;" %values
                         connector.execute_update_query(connection, cursor, success_query, data.get('TRANS_ID'))
                     except Exception as e:
+                        logging.error(e)
                         vals = (connector.model_name, e, data.get('TRANS_ID'))
                         update_query  = "UPDATE %s set ODOO_READ_SUCCESS=0, ODOO_ERROR_MESSAGE='%s' where TRANS_ID=%s" %vals
                         connector.execute_update_query(connection, cursor, update_query, data.get('TRANS_ID'))
