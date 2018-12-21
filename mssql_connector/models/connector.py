@@ -262,7 +262,7 @@ class MSSQLConnector(models.Model):
                         connector.execute_update_query(connection, cursor, success_query, data.get('TRANS_ID'))
                     except Exception as e:
                         logging.error(e)
-                        msg = e and e.replace("'","")
+                        msg = e and str(e).replace("'","")
                         vals = (connector.model_name, msg, data.get('TRANS_ID'))
                         update_query  = "UPDATE %s set ODOO_READ_SUCCESS=0, ODOO_ERROR_MESSAGE='%s' where TRANS_ID=%s" %vals
                         connector.execute_update_query(connection, cursor, update_query, data.get('TRANS_ID'))
