@@ -76,7 +76,7 @@ class MSSQLConnector(models.Model):
             # identify company_id for invoice
             if data.get('COMPANY_ID'):
                 invoice_data['company_id'] = data.get('COMPANY_ID')
-                company = self.env['res.company'].browse([invoice_data.get('company_id')])
+                company = self.env['res.company'].sudo().browse([invoice_data.get('company_id')])
                 if not company:
                     return {'error_msg':'Invalid Company'}
             else:
@@ -96,7 +96,7 @@ class MSSQLConnector(models.Model):
                 
             # get partner, account_id, payment_term_id for invoice, 
             if data.get('PARTNER_ID') and company:            
-                partner = self.env['res.partner'].search([('id', '=', data.get('PARTNER_ID'))])
+                partner = self.env['res.partner'].sudo().search([('id', '=', data.get('PARTNER_ID'))])
                 if partner:
                     partner = partner.with_context(force_company=company.id)
                     invoice_data['partner_id'] = partner.id
@@ -138,7 +138,7 @@ class MSSQLConnector(models.Model):
 
             # get product_id for line
             if data.get('PRODUCT_ID'):
-                product = self.env['product.product'].search([('id','=',data.get('PRODUCT_ID')), ('company_id','=',company.id)])
+                product = self.env['product.product'].sudo().search([('id','=',data.get('PRODUCT_ID')), ('company_id','=',company.id)])
                 if product:
                     line_data['product_id'] = product.id
                     if product.uom_id:
@@ -150,10 +150,10 @@ class MSSQLConnector(models.Model):
                 
             # get journal, account, taxes for invoice line
             if company and invoice_data.get('type') and product:
-                journal = self.env['account.invoice'].with_context({'company_id':company.id,'type':invoice_data.get('type')})._default_journal()
+                journal = self.env['account.invoice'].with_context({'company_id':company.id,'type':invoice_data.get('type')}).sudo()._default_journal()
                 if journal:
                     invoice_data['journal_id'] = journal.id
-                account = self.env['account.invoice.line'].get_invoice_line_account(invoice_data.get('type'), product, None, company)
+                account = self.env['account.invoice.line'].sudo().get_invoice_line_account(invoice_data.get('type'), product, None, company)
                 if account:
                     line_data['account_id'] = account.id         
 
@@ -242,27 +242,28 @@ class MSSQLConnector(models.Model):
                     connector.register_log(msg='TRANS_ID :%s  Msg: %s' %(data.get('TRANS_ID'), invoice_data.get('error_msg')))
                 elif invoice_vals and data.get('TRANS_ID'):
                     try:
-                        invoice = InvoiceObj.create(invoice_vals)
+                        invoice = InvoiceObj.sudo().create(invoice_vals)
                         if data.get('CURRENCY_RATE'):
-                            currency_rate = invoice.currency_id.rate_ids.filtered(lambda rec: rec.company_id and \
+                            currency_rate = invoice.sudo().currency_id.rate_ids.filtered(lambda rec: rec.company_id and \
                                         rec.company_id.id==invoice.company_id.id and rec.name==invoice.date_invoice)
                             if currency_rate and currency_rate.rate != data.get('CURRENCY_RATE'):
                                 currency_rate.rate = data.get('CURRENCY_RATE')
                             elif not currency_rate :
-                                CurrencyRateObj.create({
+                                CurrencyRateObj.sudo().create({
                                                         'name':invoice.date_invoice,
                                                         'currency_id':invoice.currency_id.id,
                                                         'company_id':invoice.company_id.id,
                                                         'rate':data.get('CURRENCY_RATE')
                                                     })
-                        invoice.action_invoice_open()
+                        invoice.sudo().action_invoice_open()
                         date_time_now = fields.Datetime.now()
                         values = (connector.model_name, date_time_now, invoice.move_id.name, data.get('TRANS_ID'))
                         success_query = "UPDATE %s set ODOO_READ_SUCCESS=1, ODOO_IS_READ=1, ODOO_IS_READ_ON='%s', ODOO_JOURNAL_REF='%s',ODOO_ERROR_MESSAGE='' where TRANS_ID=%s;" %values
                         connector.execute_update_query(connection, cursor, success_query, data.get('TRANS_ID'))
                     except Exception as e:
                         logging.error(e)
-                        vals = (connector.model_name, e, data.get('TRANS_ID'))
+                        msg = e and e.replace("'","")
+                        vals = (connector.model_name, msg, data.get('TRANS_ID'))
                         update_query  = "UPDATE %s set ODOO_READ_SUCCESS=0, ODOO_ERROR_MESSAGE='%s' where TRANS_ID=%s" %vals
                         connector.execute_update_query(connection, cursor, update_query, data.get('TRANS_ID'))
          
