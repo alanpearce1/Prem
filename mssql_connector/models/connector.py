@@ -231,41 +231,51 @@ class MSSQLConnector(models.Model):
                 else:
                     connector.register_log(msg="Connection Test Failed! Here is what we got instead:\n\n %s" % (e))    
                     continue
-                    
+
+            company_data = {}  
             for data in cursor_data:
-                invoice_data = connector.get_invoice_data(data) 
-                invoice_vals = invoice_data.get('invoice_data', False)
-                if invoice_data.get('error_msg', False) and data.get('TRANS_ID'):
-                    vals = (connector.model_name, invoice_data.get('error_msg'), data.get('TRANS_ID'))
-                    update_query  = "UPDATE %s set ODOO_READ_SUCCESS=0, ODOO_ERROR_MESSAGE='%s' where TRANS_ID=%s" %vals
-                    connector.execute_update_query(connection, cursor, update_query, data.get('TRANS_ID'))
-                    connector.register_log(msg='TRANS_ID :%s  Msg: %s' %(data.get('TRANS_ID'), invoice_data.get('error_msg')))
-                elif invoice_vals and data.get('TRANS_ID'):
-                    try:
-                        invoice = InvoiceObj.sudo().create(invoice_vals)
-                        if data.get('CURRENCY_RATE'):
-                            currency_rate = invoice.sudo().currency_id.rate_ids.filtered(lambda rec: rec.company_id and \
-                                        rec.company_id.id==invoice.company_id.id and rec.name==invoice.date_invoice)
-                            if currency_rate and currency_rate.rate != data.get('CURRENCY_RATE'):
-                                currency_rate.rate = data.get('CURRENCY_RATE')
-                            elif not currency_rate :
-                                CurrencyRateObj.sudo().create({
-                                                        'name':invoice.date_invoice,
-                                                        'currency_id':invoice.currency_id.id,
-                                                        'company_id':invoice.company_id.id,
-                                                        'rate':data.get('CURRENCY_RATE')
-                                                    })
-                        invoice.sudo().action_invoice_open()
-                        date_time_now = fields.Datetime.now()
-                        values = (connector.model_name, date_time_now, invoice.move_id.name, data.get('TRANS_ID'))
-                        success_query = "UPDATE %s set ODOO_READ_SUCCESS=1, ODOO_IS_READ=1, ODOO_IS_READ_ON='%s', ODOO_JOURNAL_REF='%s',ODOO_ERROR_MESSAGE='' where TRANS_ID=%s;" %values
-                        connector.execute_update_query(connection, cursor, success_query, data.get('TRANS_ID'))
-                    except Exception as e:
-                        logging.error(e)
-                        msg = e and str(e).replace("'","")
-                        vals = (connector.model_name, msg, data.get('TRANS_ID'))
+                if data.get('COMPANY_ID') not in company_data.keys():
+                    company_data[data.get('COMPANY_ID')] = [data]
+                else:
+                    company_data[data.get('COMPANY_ID')].append(data)
+
+            for company_id, data_value in company_data.items():
+                if connector.env.user.company_id.id != company_id:
+                    connector.env.user.company_id = company_id
+                for data in data_value:
+                    invoice_data = connector.get_invoice_data(data) 
+                    invoice_vals = invoice_data.get('invoice_data', False)
+                    if invoice_data.get('error_msg', False) and data.get('TRANS_ID'):
+                        vals = (connector.model_name, invoice_data.get('error_msg'), data.get('TRANS_ID'))
                         update_query  = "UPDATE %s set ODOO_READ_SUCCESS=0, ODOO_ERROR_MESSAGE='%s' where TRANS_ID=%s" %vals
                         connector.execute_update_query(connection, cursor, update_query, data.get('TRANS_ID'))
+                        connector.register_log(msg='TRANS_ID :%s  Msg: %s' %(data.get('TRANS_ID'), invoice_data.get('error_msg')))
+                    elif invoice_vals and data.get('TRANS_ID'):
+                        try:
+                            invoice = InvoiceObj.sudo().create(invoice_vals)
+                            if data.get('CURRENCY_RATE'):
+                                currency_rate = invoice.sudo().currency_id.rate_ids.filtered(lambda rec: rec.company_id and \
+                                            rec.company_id.id==invoice.company_id.id and rec.name==invoice.date_invoice)
+                                if currency_rate and currency_rate.rate != data.get('CURRENCY_RATE'):
+                                    currency_rate.rate = data.get('CURRENCY_RATE')
+                                elif not currency_rate :
+                                    CurrencyRateObj.sudo().create({
+                                                            'name':invoice.date_invoice,
+                                                            'currency_id':invoice.currency_id.id,
+                                                            'company_id':invoice.company_id.id,
+                                                            'rate':data.get('CURRENCY_RATE')
+                                                        })
+                            invoice.sudo().action_invoice_open()
+                            date_time_now = fields.Datetime.now()
+                            values = (connector.model_name, date_time_now, invoice.move_id.name, data.get('TRANS_ID'))
+                            success_query = "UPDATE %s set ODOO_READ_SUCCESS=1, ODOO_IS_READ=1, ODOO_IS_READ_ON='%s', ODOO_JOURNAL_REF='%s',ODOO_ERROR_MESSAGE='' where TRANS_ID=%s;" %values
+                            connector.execute_update_query(connection, cursor, success_query, data.get('TRANS_ID'))
+                        except Exception as e:
+                            logging.error(e)
+                            msg = e and str(e).replace("'","")
+                            vals = (connector.model_name, msg, data.get('TRANS_ID'))
+                            update_query  = "UPDATE %s set ODOO_READ_SUCCESS=0, ODOO_ERROR_MESSAGE='%s' where TRANS_ID=%s" %vals
+                            connector.execute_update_query(connection, cursor, update_query, data.get('TRANS_ID'))
          
             if connection:
                 connection.close() 
