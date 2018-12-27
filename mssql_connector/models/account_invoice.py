@@ -14,3 +14,16 @@ class AccountInvoice(models.Model):
     x_studio_custid_1 = fields.Integer(string='x_studio_custid_1')
 
 AccountInvoice()
+
+class AccountMove(models.Model):
+    _inherit = "account.move"
+
+    @api.model
+    def create(self, vals):
+        move = super(AccountMove, self).create(vals)
+        if self._context.get('TRANS_REF'):
+            move.name = self._context.get('TRANS_REF')
+        return move
+
+AccountMove()
+        

@@ -135,6 +135,8 @@ class MSSQLConnector(models.Model):
                 
             if data.get('TRANS_REF'):
                 invoice_data['name'] = data.get('TRANS_REF')
+            else:
+                return {'error_msg':'TRANS_REF Missing'} 
 
             # get product_id for line
             if data.get('PRODUCT_ID'):
@@ -265,18 +267,25 @@ class MSSQLConnector(models.Model):
                                                             'company_id':invoice.company_id.id,
                                                             'rate':data.get('CURRENCY_RATE')
                                                         })
-                            invoice.sudo().action_invoice_open()
-                            date_time_now = fields.Datetime.now()
-                            values = (connector.model_name, date_time_now, invoice.move_id.name, data.get('TRANS_ID'))
-                            success_query = "UPDATE %s set ODOO_READ_SUCCESS=1, ODOO_IS_READ=1, ODOO_IS_READ_ON='%s', ODOO_JOURNAL_REF='%s',ODOO_ERROR_MESSAGE='' where TRANS_ID=%s;" %values
-                            connector.execute_update_query(connection, cursor, success_query, data.get('TRANS_ID'))
+                            duplicate_invoices = self.env['account.invoice'].sudo().search([('number','=',data.get('TRANS_REF')),('company_id','=',invoice.company_id.id), 
+                                                                                             ('journal_id','=',invoice.journal_id.id),('type','=',invoice.type)])
+                            if duplicate_invoices:
+                                vals = (connector.model_name, 'Duplicate TRANS_REF', data.get('TRANS_ID'))
+                                update_query  = "UPDATE %s set ODOO_READ_SUCCESS=0, ODOO_ERROR_MESSAGE='%s' where TRANS_ID=%s" %vals
+                                connector.execute_update_query(connection, cursor, update_query, data.get('TRANS_ID'))
+                                invoice.action_cancel()
+                            else:
+                                invoice.with_context({'TRANS_REF':data.get('TRANS_REF')}).sudo().action_invoice_open()
+                                date_time_now = fields.Datetime.now()
+                                values = (connector.model_name, date_time_now, invoice.move_id.name, data.get('TRANS_ID'))
+                                success_query = "UPDATE %s set ODOO_READ_SUCCESS=1, ODOO_IS_READ=1, ODOO_IS_READ_ON='%s', ODOO_JOURNAL_REF='%s',ODOO_ERROR_MESSAGE='' where TRANS_ID=%s;" %values
+                                connector.execute_update_query(connection, cursor, success_query, data.get('TRANS_ID'))                            
                         except Exception as e:
                             logging.error(e)
                             msg = e and str(e).replace("'","")
                             vals = (connector.model_name, msg, data.get('TRANS_ID'))
                             update_query  = "UPDATE %s set ODOO_READ_SUCCESS=0, ODOO_ERROR_MESSAGE='%s' where TRANS_ID=%s" %vals
-                            connector.execute_update_query(connection, cursor, update_query, data.get('TRANS_ID'))
-         
+                            connector.execute_update_query(connection, cursor, update_query, data.get('TRANS_ID'))         
             if connection:
                 connection.close() 
         return True              
