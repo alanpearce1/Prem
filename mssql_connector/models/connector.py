@@ -85,11 +85,15 @@ class MSSQLConnector(models.Model):
             # identify invoice type
             if data.get('IS_SALES_INVOICE'):
                 invoice_data['type'] = 'out_invoice'
+                if data.get('PRICE', 0.0) < 0:
+                    invoice_data['type'] = 'out_refund'
                 invoice_data['x_studio_clinicid'] = data.get('CLINICID', 0)
                 invoice_data['x_studio_soid_2'] = data.get('SOID', '')
                 invoice_data['x_studio_custid'] = data.get('CUSTID', 0)
             else:
-                invoice_data['type'] = 'in_invoice' 
+                invoice_data['type'] = 'in_invoice'
+                if data.get('PRICE', 0.0) < 0:
+                    invoice_data['type'] = 'in_refund'
                 invoice_data['x_studio_clinicid_1'] = data.get('CLINICID', 0)
                 invoice_data['x_studio_soid_3'] = data.get('SOID', '')
                 invoice_data['x_studio_custid_1'] = data.get('CUSTID', 0)
@@ -165,7 +169,7 @@ class MSSQLConnector(models.Model):
                 line_data['quantity'] = data.get('QTY', 1)
 
             if data.get('PRICE'):
-                line_data['price_unit'] = data.get('PRICE', 0.0)
+                line_data['price_unit'] = abs(data.get('PRICE', 0.0))
 
             # currency conversion
 #            if invoice_data.get('currency_id') and data.get('PRICE') and invoice_data.get('date_invoice'):
@@ -245,6 +249,18 @@ class MSSQLConnector(models.Model):
                 if connector.env.user.company_id.id != company_id:
                     connector.env.user.company_id = company_id
                 for data in data_value:
+                    if data.get('PRICE', 0.0) == 0:
+                        try:
+                            date_time_now = fields.Datetime.now()
+                            vals = (connector.model_name, date_time_now, data.get('TRANS_ID'))
+                            update_query = "UPDATE %s set ODOO_IS_READ=1, ODOO_IS_READ_ON='%s' where TRANS_ID=%s" %vals
+                            connector.execute_update_query(connection, cursor, update_query, data.get('TRANS_ID'))
+                        except Exception as e:
+                            msg = e and str(e).replace("'","")
+                            vals = (connector.model_name, msg, data.get('TRANS_ID'))
+                            update_query  = "UPDATE %s set ODOO_READ_SUCCESS=0, ODOO_ERROR_MESSAGE='%s' where TRANS_ID=%s" %vals
+                            connector.execute_update_query(connection, cursor, update_query, data.get('TRANS_ID'))
+                        continue
                     invoice_data = connector.get_invoice_data(data) 
                     invoice_vals = invoice_data.get('invoice_data', False)
                     if invoice_data.get('error_msg', False) and data.get('TRANS_ID'):
