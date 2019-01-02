@@ -25,14 +25,14 @@ class MSSQLConnector(models.Model):
     _name = 'mssql.connector'
     description = "to handle configurations and fetch data from mssql"
 
-    name = fields.Char(string='Name') 
+    name = fields.Char(string='Name')
     active = fields.Boolean(default=True, string='Active')
     host = fields.Char(string='Host', required=True)
     username = fields.Char(string='Username', required=True)
     password = fields.Char(string='Password', required=True)
     model_name = fields.Char(string='Model', required=True)
     db_name = fields.Char(string='Database', required=True)
-
+    limit = fields.Integer(default=500, string='Limit', required=True)
 
     @api.multi
     def name_get(self):
@@ -63,14 +63,14 @@ class MSSQLConnector(models.Model):
     def get_invoice_data(self, data):
         '''
             method to get invoice values
-            returns dict with keys invoice_data or error_msg 
+            returns dict with keys invoice_data or error_msg
         '''
         if not data:
             return {'error_msg':'Data not found !'}
 
         invoice_data = {}
         line_data ={}
-        company =  False 
+        company =  False
         product = False
         try:
             # identify company_id for invoice
@@ -97,9 +97,9 @@ class MSSQLConnector(models.Model):
                 invoice_data['x_studio_clinicid_1'] = data.get('CLINICID', 0)
                 invoice_data['x_studio_soid_3'] = data.get('SOID', '')
                 invoice_data['x_studio_custid_1'] = data.get('CUSTID', 0)
-                
-            # get partner, account_id, payment_term_id for invoice, 
-            if data.get('PARTNER_ID') and company:            
+
+            # get partner, account_id, payment_term_id for invoice,
+            if data.get('PARTNER_ID') and company:
                 partner = self.env['res.partner'].sudo().search([('id', '=', data.get('PARTNER_ID'))])
                 if partner:
                     partner = partner.with_context(force_company=company.id)
@@ -116,7 +116,7 @@ class MSSQLConnector(models.Model):
                     if payment_term_id:
                         invoice_data['payment_term_id'] = payment_term_id.id
                 else:
-                    return {'error_msg':'Invalid Partner with company'}                
+                    return {'error_msg':'Invalid Partner with company'}
             else:
                 return {'error_msg':'Partner not found'}
 
@@ -133,14 +133,14 @@ class MSSQLConnector(models.Model):
 
             #get currency_id
             if data.get('CURRENCY_ID'):
-                invoice_data['currency_id'] = data.get('CURRENCY_ID')                            
+                invoice_data['currency_id'] = data.get('CURRENCY_ID')
             else:
-                return {'error_msg':'Invalid CURRENCY_ID'}            
-                
+                return {'error_msg':'Invalid CURRENCY_ID'}
+
             if data.get('TRANS_REF'):
                 invoice_data['name'] = data.get('TRANS_REF')
             else:
-                return {'error_msg':'TRANS_REF Missing'} 
+                return {'error_msg':'TRANS_REF Missing'}
 
             # get product_id for line
             if data.get('PRODUCT_ID'):
@@ -150,10 +150,10 @@ class MSSQLConnector(models.Model):
                     if product.uom_id:
                         line_data['uom_id'] =  product.uom_id.id
                 else:
-                    return {'error_msg':'Invalid product with company'}              
+                    return {'error_msg':'Invalid product with company'}
             else:
                 return {'error_msg':'Invalid product'}
-                
+
             # get journal, account, taxes for invoice line
             if company and invoice_data.get('type') and product:
                 journal = self.env['account.invoice'].with_context({'company_id':company.id,'type':invoice_data.get('type')}).sudo()._default_journal()
@@ -161,7 +161,7 @@ class MSSQLConnector(models.Model):
                     invoice_data['journal_id'] = journal.id
                 account = self.env['account.invoice.line'].sudo().get_invoice_line_account(invoice_data.get('type'), product, None, company)
                 if account:
-                    line_data['account_id'] = account.id         
+                    line_data['account_id'] = account.id
 
             line_data['name'] = data.get('DESCRIPTION', '/')
 
@@ -174,10 +174,10 @@ class MSSQLConnector(models.Model):
             # currency conversion
 #            if invoice_data.get('currency_id') and data.get('PRICE') and invoice_data.get('date_invoice'):
 #                currency = self.env['res.currency'].browse([invoice_data.get('currency_id')])
-#                if company.currency_id != currency:   
+#                if company.currency_id != currency:
 #                    currency_rate = currency.with_context({'date':invoice_data.get('date_invoice')}).rate
 #                    if currency_rate != data.get('CURRENCY_RATE'):
-#                        currency_rate = data.get('CURRENCY_RATE')             
+#                        currency_rate = data.get('CURRENCY_RATE')
 #                    line_data['price_unit'] = data.get('PRICE', 0.0) * currency_rate
 
             if line_data:
@@ -185,7 +185,7 @@ class MSSQLConnector(models.Model):
 
         except Exception as e:
             return {'error_msg':'%s:%s' %(data.get('TRANS_ID'), e)}
-            
+
 
         return {'invoice_data':invoice_data}
 
@@ -201,7 +201,7 @@ class MSSQLConnector(models.Model):
                                         'db_name':self.db_name,
                                         'model_name':self.model_name,
                                         'log':msg,
-                                    })   
+                                    })
         return True
 
     @api.model
@@ -228,17 +228,17 @@ class MSSQLConnector(models.Model):
             try:
                 connection = pymssql.connect(connector.host, connector.username, connector.password, connector.db_name)
                 cursor = connection.cursor(as_dict=True)
-                select_query = 'SELECT * FROM %s WHERE ODOO_IS_READ=0' %(connector.model_name)
+                select_query = 'SELECT TOP %s * FROM %s WHERE ODOO_IS_READ=0' %(connector.limit, connector.model_name)
                 cursor.execute(select_query)
                 cursor_data = cursor.fetchall()
             except Exception as e:
                 if self._context.get('raise_error'):
                     raise UserError(_("Connection Test Failed! Here is what we got instead:\n\n %s") % (e))
                 else:
-                    connector.register_log(msg="Connection Test Failed! Here is what we got instead:\n\n %s" % (e))    
+                    connector.register_log(msg="Connection Test Failed! Here is what we got instead:\n\n %s" % (e))
                     continue
 
-            company_data = {}  
+            company_data = {}
             for data in cursor_data:
                 if data.get('COMPANY_ID') not in company_data.keys():
                     company_data[data.get('COMPANY_ID')] = [data]
@@ -260,14 +260,15 @@ class MSSQLConnector(models.Model):
                             vals = (connector.model_name, msg, data.get('TRANS_ID'))
                             update_query  = "UPDATE %s set ODOO_READ_SUCCESS=0, ODOO_ERROR_MESSAGE='%s' where TRANS_ID=%s" %vals
                             connector.execute_update_query(connection, cursor, update_query, data.get('TRANS_ID'))
+                            connector.register_log(msg='TRANS_ID :%s \nMsg: %s \n\nData: %s' %(data.get('TRANS_ID'), msg, data))
                         continue
-                    invoice_data = connector.get_invoice_data(data) 
+                    invoice_data = connector.get_invoice_data(data)
                     invoice_vals = invoice_data.get('invoice_data', False)
                     if invoice_data.get('error_msg', False) and data.get('TRANS_ID'):
                         vals = (connector.model_name, invoice_data.get('error_msg'), data.get('TRANS_ID'))
                         update_query  = "UPDATE %s set ODOO_READ_SUCCESS=0, ODOO_ERROR_MESSAGE='%s' where TRANS_ID=%s" %vals
                         connector.execute_update_query(connection, cursor, update_query, data.get('TRANS_ID'))
-                        connector.register_log(msg='TRANS_ID :%s  Msg: %s' %(data.get('TRANS_ID'), invoice_data.get('error_msg')))
+                        connector.register_log(msg='TRANS_ID :%s \nMsg: %s \n\nData: %s' %(data.get('TRANS_ID'), invoice_data.get('error_msg'), data))
                     elif invoice_vals and data.get('TRANS_ID'):
                         try:
                             invoice = InvoiceObj.sudo().create(invoice_vals)
@@ -283,30 +284,32 @@ class MSSQLConnector(models.Model):
                                                             'company_id':invoice.company_id.id,
                                                             'rate':data.get('CURRENCY_RATE')
                                                         })
-                            duplicate_invoices = self.env['account.invoice'].sudo().search([('number','=',data.get('TRANS_REF')),('company_id','=',invoice.company_id.id), 
+                            duplicate_invoices = self.env['account.invoice'].sudo().search([('number','=',data.get('TRANS_REF')),('company_id','=',invoice.company_id.id),
                                                                                              ('journal_id','=',invoice.journal_id.id),('type','=',invoice.type)])
                             if duplicate_invoices:
                                 vals = (connector.model_name, 'Duplicate TRANS_REF', data.get('TRANS_ID'))
                                 update_query  = "UPDATE %s set ODOO_READ_SUCCESS=0, ODOO_ERROR_MESSAGE='%s' where TRANS_ID=%s" %vals
                                 connector.execute_update_query(connection, cursor, update_query, data.get('TRANS_ID'))
+                                connector.register_log(msg='TRANS_ID :%s \nMsg: Duplicate TRANS_REF \n\n Data: %s' %(data.get('TRANS_ID'), data))
                                 invoice.action_cancel()
                             else:
                                 invoice.with_context({'TRANS_REF':data.get('TRANS_REF')}).sudo().action_invoice_open()
                                 date_time_now = fields.Datetime.now()
                                 values = (connector.model_name, date_time_now, invoice.move_id.name, data.get('TRANS_ID'))
                                 success_query = "UPDATE %s set ODOO_READ_SUCCESS=1, ODOO_IS_READ=1, ODOO_IS_READ_ON='%s', ODOO_JOURNAL_REF='%s',ODOO_ERROR_MESSAGE='' where TRANS_ID=%s;" %values
-                                connector.execute_update_query(connection, cursor, success_query, data.get('TRANS_ID'))                            
+                                connector.execute_update_query(connection, cursor, success_query, data.get('TRANS_ID'))
                         except Exception as e:
                             logging.error(e)
                             msg = e and str(e).replace("'","")
                             vals = (connector.model_name, msg, data.get('TRANS_ID'))
                             update_query  = "UPDATE %s set ODOO_READ_SUCCESS=0, ODOO_ERROR_MESSAGE='%s' where TRANS_ID=%s" %vals
-                            connector.execute_update_query(connection, cursor, update_query, data.get('TRANS_ID'))         
+                            connector.execute_update_query(connection, cursor, update_query, data.get('TRANS_ID'))
+                            connector.register_log(msg='TRANS_ID :%s \nMsg: %s \n\n Data: %s' %(data.get('TRANS_ID'), msg, data))
             if connection:
-                connection.close() 
-        return True              
-                        
-                        
+                connection.close()
+        return True
+
+
     @api.multi
     def run_mssql_connector_cron(self):
         '''
