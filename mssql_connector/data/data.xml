@@ -1,5 +1,5 @@
 <?xml version="1.0"?>
-<openerp>
+<odoo>
     <data noupdate='0'> 
         <record model="ir.cron" id="ir_cron_msssql_connector">
             <field name="name">MSSQL CONNECTOR CRON</field>
@@ -8,12 +8,28 @@
             <field name="code">
 model.run_mssql_connector_cron()
             </field>
-            <field name="active" eval="False"/> 
+            <field name="active" eval="False"/>
             <field name="user_id" ref="base.user_root" />
             <field name="interval_number">1</field>
             <field name="interval_type">hours</field>  
             <field name="numbercall">-1</field>
             <field name="doall" eval="False"/>
         </record>
+
+        <record model="ir.cron" id="ir_cron_payment_msssql_connector">
+            <field name="name">PAYMENT MSSQL CONNECTOR CRON</field>
+            <field name="model_id" ref="model_mssql_connector"/>
+            <field name="state">code</field>
+            <field name="code">
+model.run_mssql_connector_payment_cron()
+            </field>
+            <field name="active" eval="False"/>
+            <field name="user_id" ref="base.user_root"/>
+            <field name="interval_number">1</field>
+            <field name="interval_type">hours</field>
+            <field name="numbercall">-1</field>
+            <field name="doall" eval="False"/>
+        </record>
+
     </data>
-</openerp>
+</odoo>
