@@ -250,6 +250,13 @@ class MSSQLConnector(models.Model):
                     connector.register_log(msg="Connection Test Failed! Here is what we got instead:\n\n %s" % (e))
                     continue
 
+            if cursor_data and not 'TRANS_ID' in cursor_data[0].keys():
+                warning = "TRANS_ID not found in the model %s. Please check the connector model and type." %(connector.model_name)
+                if self._context.get('raise_error'):
+                    raise UserError(_(warning))
+                connector.register_log(msg=warning)
+                continue
+
             company_data = {}
             for data in cursor_data:
                 if data.get('COMPANY_ID') not in company_data.keys():
@@ -322,9 +329,9 @@ class MSSQLConnector(models.Model):
         return True
 
     @api.multi
-    def run_mssql_connector_cron(self):
+    def run_mssql_connector_invoice_cron(self):
         '''
-            cron method to pull data
+            cron method to pull data for invoices
         '''
         for connector in self.env['mssql.connector'].sudo().search([('connector_type', '=', 'invoice')]):
             connector.sudo().run_connector()
@@ -427,6 +434,13 @@ class MSSQLConnector(models.Model):
                     continue
 
             if connector.connector_type == 'payment':
+                if cursor_data and not 'PAY_TRANS_ID' in cursor_data[0].keys():
+                    warning = "PAY_TRANS_ID not found in the model %s. Please check the connector model and type." %(connector.model_name)
+                    if self._context.get('raise_error'):
+                        raise UserError(_(warning))
+                    connector.register_log(msg=warning)
+                    continue
+
                 company_data = {}
                 for data in cursor_data:
                     if data.get('COMPANY_ID') not in company_data.keys():
