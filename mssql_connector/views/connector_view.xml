@@ -8,9 +8,12 @@
                 <form>
                     <sheet>
                         <div class="oe_button_box" name="button_box">
-                            <button name="run_connector" type="object" string="Connect" icon="fa-refresh"
-                                class="oe_stat_button" context="{'raise_error':True}"
-                                attrs="{'invisible':[('active','=',False)]}"/>
+                                <button name="run_connector_invoice"  class="oe_stat_button" type="object" string="Create Invoice"
+                                    context="{'raise_error':True}"  icon="fa-book" 
+                                    attrs="{'invisible':[('active','=',False)]}"/>
+                                <button name="run_connector_payment"  class="oe_stat_button" type="object" string="Create Payments"
+                                    context="{'raise_error':True}"  icon="fa-dollar" 
+                                     attrs="{'invisible':[('active','=',False)]}"/>
                             <button name="toggle_active" type="object" class="oe_stat_button" icon="fa-archive">
                                 <field name="active" widget="boolean_button"/>
                             </button>
@@ -19,11 +22,11 @@
                             <group >  
                                 <field name='host'/>
                                 <field name='db_name'/>
-                            </group>
-                            <group>  
-                                <field name='model_name'/>
                                 <field name='limit'/>
-                                <field name="connector_type"/>
+                            </group>
+                            <group>
+                                <field name='invoice_model'/>
+                                <field name='payment_model'/>
                             </group>
                         </group>
                         <group string="Security and Authentication">
@@ -44,7 +47,6 @@
             <field name="model">mssql.connector</field>
             <field name="arch" type="xml">
                 <tree string='MSSQL Connector'>
-                    <field name='model_name'/>
                     <field name='db_name'/>
                 </tree>
             </field>

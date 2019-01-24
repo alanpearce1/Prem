@@ -30,20 +30,17 @@ class MSSQLConnector(models.Model):
     host = fields.Char(string='Host', required=True)
     username = fields.Char(string='Username', required=True)
     password = fields.Char(string='Password', required=True)
-    model_name = fields.Char(string='Model', required=True)
     db_name = fields.Char(string='Database', required=True)
     limit = fields.Integer(default=500, string='Limit', required=True)
-    connector_type = fields.Selection([
-        ('invoice', 'Invoice Creation'),
-        ('payment', 'Payment Creation')
-    ], string='Type', required=True)
+    invoice_model = fields.Char(string='Invoice Model')
+    payment_model = fields.Char(string='Payment Model')
 
 
     @api.multi
     def name_get(self):
         res = []
         for connector in self:
-            name = '%s - %s' % (connector.db_name, connector.model_name)
+            name = '%s - %s' % (connector.db_name, connector.host)
             res.append((connector.id, name))
         return res
 
@@ -195,7 +192,7 @@ class MSSQLConnector(models.Model):
         return {'invoice_data':invoice_data}
 
     @api.multi
-    def register_log(self, msg=False):
+    def register_log(self, model='', msg=False):
         '''
            method to log error on query execution
         '''
@@ -204,13 +201,13 @@ class MSSQLConnector(models.Model):
             self.env['mssql.connector.log'].create({
                                         'connector_id':self.id,
                                         'db_name':self.db_name,
-                                        'model_name':self.model_name,
+                                        'model_name': model,
                                         'log':msg,
                                     })
         return True
 
     @api.model
-    def execute_update_query(self, conn, cursor, query, trans_id):
+    def execute_update_query(self, conn, cursor, query, trans_id, model):
         '''
            method for update query execution
         '''
@@ -219,13 +216,15 @@ class MSSQLConnector(models.Model):
                 cursor.execute(query)
                 conn.commit()
         except Exception as e:
-            self.register_log(msg='TRANS_ID :%s,  Msg: %s, Query: %s' %(trans_id, e, query))
+            self.register_log(model=model, msg='ID :%s,  Msg: %s, Query: %s' %(trans_id, e, query))
 
     @api.multi
     def run_connector(self):
         self.ensure_one()
-        if hasattr(self, 'run_connector_%s' % self.connector_type):
-            return getattr(self, 'run_connector_%s' % self.connector_type)()
+        if self.invoice_model:
+            self.run_connector_invoice()
+        if self.payment_model:
+            self.run_connector_payment()
         return True
 
     @api.multi
@@ -237,24 +236,29 @@ class MSSQLConnector(models.Model):
         CurrencyRateObj = self.env['res.currency.rate']
         for connector in self.sudo():
             connection = False
+            if not connector.invoice_model:
+                if self._context.get('raise_error'):
+                    raise UserError(_("Please check the Invoice Model"))
+                connector.register_log(model='Not Defined', msg="Please check the Invoice Model")
+                continue
             try:
                 connection = pymssql.connect(connector.host, connector.username, connector.password, connector.db_name)
                 cursor = connection.cursor(as_dict=True)
-                select_query = 'SELECT TOP %s * FROM %s WHERE ODOO_IS_READ=0' %(connector.limit, connector.model_name)
+                select_query = 'SELECT TOP %s * FROM %s WHERE ODOO_IS_READ=0' %(connector.limit, connector.invoice_model)
                 cursor.execute(select_query)
                 cursor_data = cursor.fetchall()
             except Exception as e:
                 if self._context.get('raise_error'):
-                    raise UserError(_("Connection Test Failed! Here is what we got instead:\n\n %s") % (e))
+                    raise UserError(_("Connection Failed! Here is what we got instead:\n\n %s") % (e))
                 else:
-                    connector.register_log(msg="Connection Test Failed! Here is what we got instead:\n\n %s" % (e))
+                    connector.register_log(model=connector.invoice_model, msg="Connection Failed! Here is what we got instead:\n\n %s" % (e))
                     continue
 
             if cursor_data and not 'TRANS_ID' in cursor_data[0].keys():
-                warning = "TRANS_ID not found in the model %s. Please check the connector model and type." %(connector.model_name)
+                warning = "TRANS_ID not found in the model %s. Please check the Invoice model" %(connector.invoice_model)
                 if self._context.get('raise_error'):
                     raise UserError(_(warning))
-                connector.register_log(msg=warning)
+                connector.register_log(model=connector.invoice_model, msg=warning)
                 continue
 
             company_data = {}
@@ -271,23 +275,23 @@ class MSSQLConnector(models.Model):
                     if data.get('PRICE', 0.0) == 0:
                         try:
                             date_time_now = fields.Datetime.now()
-                            vals = (connector.model_name, date_time_now, data.get('TRANS_ID'))
+                            vals = (connector.invoice_model, date_time_now, data.get('TRANS_ID'))
                             update_query = "UPDATE %s set ODOO_IS_READ=1, ODOO_IS_READ_ON='%s' where TRANS_ID=%s" %vals
-                            connector.execute_update_query(connection, cursor, update_query, data.get('TRANS_ID'))
+                            connector.execute_update_query(connection, cursor, update_query, data.get('TRANS_ID'), connector.invoice_model)
                         except Exception as e:
                             msg = e and str(e).replace("'","")
-                            vals = (connector.model_name, msg, data.get('TRANS_ID'))
+                            vals = (connector.invoice_model, msg, data.get('TRANS_ID'))
                             update_query  = "UPDATE %s set ODOO_READ_SUCCESS=0, ODOO_ERROR_MESSAGE='%s' where TRANS_ID=%s" %vals
-                            connector.execute_update_query(connection, cursor, update_query, data.get('TRANS_ID'))
-                            connector.register_log(msg='TRANS_ID :%s \nMsg: %s \n\nData: %s' %(data.get('TRANS_ID'), msg, data))
+                            connector.execute_update_query(connection, cursor, update_query, data.get('TRANS_ID'), connector.invoice_model)
+                            connector.register_log(model=connector.invoice_model, msg='TRANS_ID :%s \nMsg: %s \n\nData: %s' %(data.get('TRANS_ID'), msg, data))
                         continue
                     invoice_data = connector.get_invoice_data(data)
                     invoice_vals = invoice_data.get('invoice_data', False)
                     if invoice_data.get('error_msg', False) and data.get('TRANS_ID'):
-                        vals = (connector.model_name, invoice_data.get('error_msg'), data.get('TRANS_ID'))
+                        vals = (connector.invoice_model, invoice_data.get('error_msg'), data.get('TRANS_ID'))
                         update_query  = "UPDATE %s set ODOO_READ_SUCCESS=0, ODOO_ERROR_MESSAGE='%s' where TRANS_ID=%s" %vals
-                        connector.execute_update_query(connection, cursor, update_query, data.get('TRANS_ID'))
-                        connector.register_log(msg='TRANS_ID :%s \nMsg: %s \n\nData: %s' %(data.get('TRANS_ID'), invoice_data.get('error_msg'), data))
+                        connector.execute_update_query(connection, cursor, update_query, data.get('TRANS_ID'), connector.invoice_model)
+                        connector.register_log(model=connector.invoice_model, msg='TRANS_ID :%s \nMsg: %s \n\nData: %s' %(data.get('TRANS_ID'), invoice_data.get('error_msg'), data))
                     elif invoice_vals and data.get('TRANS_ID'):
                         try:
                             invoice = InvoiceObj.sudo().create(invoice_vals)
@@ -306,24 +310,24 @@ class MSSQLConnector(models.Model):
                             duplicate_invoices = self.env['account.invoice'].sudo().search([('number','=',data.get('TRANS_REF')),('company_id','=',invoice.company_id.id),
                                                                                              ('journal_id','=',invoice.journal_id.id),('type','=',invoice.type)])
                             if duplicate_invoices:
-                                vals = (connector.model_name, 'Duplicate TRANS_REF', data.get('TRANS_ID'))
+                                vals = (connector.invoice_model, 'Duplicate TRANS_REF', data.get('TRANS_ID'))
                                 update_query  = "UPDATE %s set ODOO_READ_SUCCESS=0, ODOO_ERROR_MESSAGE='%s' where TRANS_ID=%s" %vals
-                                connector.execute_update_query(connection, cursor, update_query, data.get('TRANS_ID'))
-                                connector.register_log(msg='TRANS_ID :%s \nMsg: Duplicate TRANS_REF \n\n Data: %s' %(data.get('TRANS_ID'), data))
+                                connector.execute_update_query(connection, cursor, update_query, data.get('TRANS_ID'), connector.invoice_model)
+                                connector.register_log(model=connector.invoice_model, msg='TRANS_ID :%s \nMsg: Duplicate TRANS_REF \n\n Data: %s' %(data.get('TRANS_ID'), data))
                                 invoice.action_cancel()
                             else:
                                 invoice.with_context({'TRANS_REF':data.get('TRANS_REF')}).sudo().action_invoice_open()
                                 date_time_now = fields.Datetime.now()
-                                values = (connector.model_name, date_time_now, invoice.move_id.name, data.get('TRANS_ID'))
+                                values = (connector.invoice_model, date_time_now, invoice.move_id.name, data.get('TRANS_ID'))
                                 success_query = "UPDATE %s set ODOO_READ_SUCCESS=1, ODOO_IS_READ=1, ODOO_IS_READ_ON='%s', ODOO_JOURNAL_REF='%s',ODOO_ERROR_MESSAGE='' where TRANS_ID=%s;" %values
-                                connector.execute_update_query(connection, cursor, success_query, data.get('TRANS_ID'))
+                                connector.execute_update_query(connection, cursor, success_query, data.get('TRANS_ID'), connector.invoice_model)
                         except Exception as e:
                             logging.error(e)
                             msg = e and str(e).replace("'","")
-                            vals = (connector.model_name, msg, data.get('TRANS_ID'))
+                            vals = (connector.invoice_model, msg, data.get('TRANS_ID'))
                             update_query  = "UPDATE %s set ODOO_READ_SUCCESS=0, ODOO_ERROR_MESSAGE='%s' where TRANS_ID=%s" %vals
-                            connector.execute_update_query(connection, cursor, update_query, data.get('TRANS_ID'))
-                            connector.register_log(msg='TRANS_ID :%s \nMsg: %s \n\n Data: %s' %(data.get('TRANS_ID'), msg, data))
+                            connector.execute_update_query(connection, cursor, update_query, data.get('TRANS_ID'), connector.invoice_model)
+                            connector.register_log(model=connector.invoice_model, msg='TRANS_ID :%s \nMsg: %s \n\n Data: %s' %(data.get('TRANS_ID'), msg, data))
             if connection:
                 connection.close()
         return True
@@ -333,8 +337,8 @@ class MSSQLConnector(models.Model):
         '''
             cron method to pull data for invoices
         '''
-        for connector in self.env['mssql.connector'].sudo().search([('connector_type', '=', 'invoice')]):
-            connector.sudo().run_connector()
+        for connector in self.env['mssql.connector'].sudo().search([]):
+            connector.sudo().run_connector_invoice()
         return True
 
     def get_payment_data(self, data):
@@ -420,72 +424,78 @@ class MSSQLConnector(models.Model):
         '''
         for connector in self.sudo():
             connection = False
+
+            if not connector.payment_model:
+                if self._context.get('raise_error'):
+                    raise UserError(_("Please check the Payment Model"))
+                connector.register_log(model="Not Defined", msg="Please check the Payment Model")
+                continue
+
             try:
                 connection = pymssql.connect(connector.host, connector.username, connector.password, connector.db_name)
                 cursor = connection.cursor(as_dict=True)
-                select_query = 'SELECT TOP %s * FROM %s WHERE ODOO_IS_READ=0' %(connector.limit, connector.model_name)
+                select_query = 'SELECT TOP %s * FROM %s WHERE ODOO_IS_READ=0' %(connector.limit, connector.payment_model)
                 cursor.execute(select_query)
                 cursor_data = cursor.fetchall()
             except Exception as e:
                 if self._context.get('raise_error'):
-                    raise UserError(_("Connection Test Failed! Here is what we got instead:\n\n %s") % (e))
+                    raise UserError(_("Connection Failed! Here is what we got instead:\n\n %s") % (e))
                 else:
-                    connector.register_log(msg="Connection Test Failed! Here is what we got instead:\n\n %s" % (e))
+                    connector.register_log(model=connector.payment_model, msg="Connection Failed! Here is what we got instead:\n\n %s" % (e))
                     continue
 
-            if connector.connector_type == 'payment':
-                if cursor_data and not 'PAY_TRANS_ID' in cursor_data[0].keys():
-                    warning = "PAY_TRANS_ID not found in the model %s. Please check the connector model and type." %(connector.model_name)
-                    if self._context.get('raise_error'):
-                        raise UserError(_(warning))
-                    connector.register_log(msg=warning)
-                    continue
+            if cursor_data and not 'PAY_TRANS_ID' in cursor_data[0].keys():
+                warning = "PAY_TRANS_ID not found in the model %s. Please check the Payment Model" %(connector.payment_model)
+                if self._context.get('raise_error'):
+                    raise UserError(_(warning))
+                connector.register_log(model=connector.payment_model, msg=warning)
+                continue
 
-                company_data = {}
-                for data in cursor_data:
-                    if data.get('COMPANY_ID') not in company_data.keys():
-                        company_data[data.get('COMPANY_ID')] = [data]
-                    else:
-                        company_data[data.get('COMPANY_ID')].append(data)
+            company_data = {}
+            for data in cursor_data:
+                if data.get('COMPANY_ID') not in company_data.keys():
+                    company_data[data.get('COMPANY_ID')] = [data]
+                else:
+                    company_data[data.get('COMPANY_ID')].append(data)
 
-                for company_id, data_value in company_data.items():
-                    if connector.env.user.company_id.id != company_id:
-                        connector.env.user.company_id = company_id
-                    for data in data_value:
-                        payment_data = connector.get_payment_data(data)
-                        payment_vals = payment_data.get('payment_data', False)
-                        if payment_data.get('error_msg', False) and data.get('PAY_TRANS_ID'):
-                            vals = (connector.model_name, payment_data.get('error_msg'), data.get('PAY_TRANS_ID'))
+            for company_id, data_value in company_data.items():
+                if connector.env.user.company_id.id != company_id:
+                    connector.env.user.company_id = company_id
+                for data in data_value:
+                    payment_data = connector.get_payment_data(data)
+                    payment_vals = payment_data.get('payment_data', False)
+                    if payment_data.get('error_msg', False) and data.get('PAY_TRANS_ID'):
+                        vals = (connector.payment_model, payment_data.get('error_msg'), data.get('PAY_TRANS_ID'))
+                        update_query  = "UPDATE %s set ODOO_READ_SUCCESS=0, ODOO_ERROR_MESSAGE='%s' where PAY_TRANS_ID=%s" %vals
+                        connector.execute_update_query(connection, cursor, update_query, data.get('PAY_TRANS_ID'), connector.payment_model)
+                        connector.register_log(model=connector.payment_model, msg='PAY_TRANS_ID :%s \nMsg: %s \n\nData: %s' %(data.get('PAY_TRANS_ID'), payment_data.get('error_msg'), data))
+                    elif payment_vals and data.get('PAY_TRANS_ID'):
+                        try:
+                            payment = self.env['account.payment'].sudo().create(payment_vals)
+                            if data.get('CURRENCY_RATE'):
+                                currency_rate = payment.sudo().currency_id.rate_ids.filtered(lambda rec: rec.company_id and \
+                                            rec.company_id.id==payment.company_id.id and rec.name==payment.payment_date)
+                                if currency_rate and currency_rate.rate != data.get('CURRENCY_RATE'):
+                                    currency_rate.rate = data.get('CURRENCY_RATE')
+                                elif not currency_rate:
+                                    self.env['res.currency.rate'].sudo().create({
+                                        'name': payment.payment_date,
+                                        'currency_id': payment.currency_id.id,
+                                        'company_id': payment.company_id.id,
+                                        'rate': data.get('CURRENCY_RATE')
+                                    })
+                            payment.sudo().post()
+                            date_time_now = fields.Datetime.now()
+                            values = (connector.payment_model, date_time_now, payment.move_name, data.get('PAY_TRANS_ID'))
+                            success_query = "UPDATE %s set ODOO_READ_SUCCESS=1, ODOO_IS_READ=1, ODOO_IS_READ_ON='%s', ODOO_JOURNAL_REF='%s',ODOO_ERROR_MESSAGE='' where PAY_TRANS_ID=%s;" %values
+                            connector.execute_update_query(connection, cursor, success_query, data.get('PAY_TRANS_ID'), connector.payment_model)
+                        except Exception as e:
+                            logging.error(e)
+                            msg = e and str(e).replace("'","")
+                            vals = (connector.payment_model, msg, data.get('PAY_TRANS_ID'))
                             update_query  = "UPDATE %s set ODOO_READ_SUCCESS=0, ODOO_ERROR_MESSAGE='%s' where PAY_TRANS_ID=%s" %vals
-                            connector.execute_update_query(connection, cursor, update_query, data.get('PAY_TRANS_ID'))
-                            connector.register_log(msg='PAY_TRANS_ID :%s \nMsg: %s \n\nData: %s' %(data.get('PAY_TRANS_ID'), payment_data.get('error_msg'), data))
-                        elif payment_vals and data.get('PAY_TRANS_ID'):
-                            try:
-                                payment = self.env['account.payment'].sudo().create(payment_vals)
-                                if data.get('CURRENCY_RATE'):
-                                    currency_rate = payment.sudo().currency_id.rate_ids.filtered(lambda rec: rec.company_id and \
-                                                rec.company_id.id==payment.company_id.id and rec.name==payment.payment_date)
-                                    if currency_rate and currency_rate.rate != data.get('CURRENCY_RATE'):
-                                        currency_rate.rate = data.get('CURRENCY_RATE')
-                                    elif not currency_rate:
-                                        self.env['res.currency.rate'].sudo().create({
-                                            'name': payment.payment_date,
-                                            'currency_id': payment.currency_id.id,
-                                            'company_id': payment.company_id.id,
-                                            'rate': data.get('CURRENCY_RATE')
-                                        })
-                                payment.sudo().post()
-                                date_time_now = fields.Datetime.now()
-                                values = (connector.model_name, date_time_now, payment.move_name, data.get('PAY_TRANS_ID'))
-                                success_query = "UPDATE %s set ODOO_READ_SUCCESS=1, ODOO_IS_READ=1, ODOO_IS_READ_ON='%s', ODOO_JOURNAL_REF='%s',ODOO_ERROR_MESSAGE='' where PAY_TRANS_ID=%s;" %values
-                                connector.execute_update_query(connection, cursor, success_query, data.get('PAY_TRANS_ID'))
-                            except Exception as e:
-                                logging.error(e)
-                                msg = e and str(e).replace("'","")
-                                vals = (connector.model_name, msg, data.get('PAY_TRANS_ID'))
-                                update_query  = "UPDATE %s set ODOO_READ_SUCCESS=0, ODOO_ERROR_MESSAGE='%s' where PAY_TRANS_ID=%s" %vals
-                                connector.execute_update_query(connection, cursor, update_query, data.get('PAY_TRANS_ID'))
-                                connector.register_log(msg='PAY_TRANS_ID :%s \nMsg: %s \n\n Data: %s' %(data.get('PAY_TRANS_ID'), msg, data))
+                            connector.execute_update_query(connection, cursor, update_query, data.get('PAY_TRANS_ID'), connector.payment_model)
+                            connector.register_log(model=connector.payment_model, msg='PAY_TRANS_ID :%s \nMsg: %s \n\n Data: %s' %(data.get('PAY_TRANS_ID'), msg, data))
 
             if connection:
                 connection.close()
@@ -496,8 +506,8 @@ class MSSQLConnector(models.Model):
         '''
             cron method to pull data for payments
         '''
-        for connector in self.env['mssql.connector'].sudo().search([('connector_type', '=', 'payment')]):
-            connector.sudo().run_connector()
+        for connector in self.env['mssql.connector'].sudo().search([]):
+            connector.sudo().run_connector_payment()
         return True
 
 
