@@ -34,6 +34,7 @@ class MSSQLConnector(models.Model):
     limit = fields.Integer(default=500, string='Limit', required=True)
     invoice_model = fields.Char(string='Invoice Model')
     payment_model = fields.Char(string='Payment Model')
+    internal_payment_model = fields.Char(string='Internal Payment Model')    
 
 
     @api.multi
@@ -508,6 +509,186 @@ class MSSQLConnector(models.Model):
         '''
         for connector in self.env['mssql.connector'].sudo().search([]):
             connector.sudo().run_connector_payment()
+        return True
+
+    def get_internal_payment_data(self, data):
+        """
+        Get the internal payment values
+
+        :rtype           : `dict`
+        :returns         : dictionary with keys payment_data or error_msg
+
+        """
+        if not data:
+            return {'error_msg': 'Data not found !'}
+
+        payment_data = {}
+        company = False
+        payment_method = False
+        try:
+            # Company
+            if data.get('COMPANY_ID'):
+                payment_data['company_id'] = data.get('COMPANY_ID')
+                company = self.env['res.company'].sudo().browse([payment_data.get('company_id')])
+                if not company:
+                    return {'error_msg':'Invalid Company'}
+            else:
+                return {'error_msg':'Invalid Company'}
+
+            # Payment Type
+            payment_data['payment_type'] = 'transfer'
+            payment_method = self.env.ref('account.account_payment_method_manual_in')
+            if data.get('PAYMENT_AMOUNT') < 0:
+                payment_method = self.env.ref('account.account_payment_method_manual_out')
+            if payment_method:
+                payment_data['payment_method_id'] = payment_method.id
+
+            #Payment Date
+            if data.get('PAY_DATE'):
+                payment_date = datetime.strptime(data.get('PAY_DATE'),"%Y-%m-%d").date()
+                payment_data['payment_date'] = payment_date.strftime(DEFAULT_SERVER_DATE_FORMAT)
+            if data.get('MEMO'):
+                payment_data['communication'] = data.get('MEMO')
+
+            # Payment Journal
+            if data.get('PAYMENT_JOURNAL_ID') and company:
+                journal = self.env['account.journal'].sudo().search([('id', '=', data.get('PAYMENT_JOURNAL_ID')), ('company_id', '=', company.id)])
+                if journal:
+                    payment_data['journal_id'] = journal.id
+                else:
+                    return {'error_msg': 'Invalid Payment Journal with company'}
+            else:
+                return {'error_msg': 'Invalid PAYMENT_JOURNAL_ID'}
+
+            # Recipient Journal
+            if data.get('RECIPIENT_JOURNAL_ID') and company:
+
+                journal = self.env['account.journal'].sudo().search([('id', '=', data.get('RECIPIENT_JOURNAL_ID')), ('company_id', '=', company.id)])
+                if journal:
+                    payment_data['destination_journal_id'] = journal.id
+                    # if journal.currency_id and journal.currency_id.id == data.get('RECIPIENT_CURRENCY_ID'):
+                    #     payment_data['destination_journal_id'] = journal.id
+                    # else:
+                    #     return {'error_msg': ' Recipient Journal with different RECIPIENT_CURRENCY_ID'}
+                else:
+                    return {'error_msg': 'Invalid Recipient Journal with company'}
+            else:
+                return {'error_msg': 'Invalid RECIPIENT_JOURNAL_ID'}
+
+            # Payment Currency id
+            if data.get('PAYMENT_CURRENCY_ID'):
+                payment_data['currency_id'] = data.get('PAYMENT_CURRENCY_ID')
+            else:
+                return {'error_msg':'Invalid PAYMENT_CURRENCY_ID'}
+
+            #Amount
+            if data.get('PAYMENT_AMOUNT'):
+                payment_data['amount'] = abs(data.get('PAYMENT_AMOUNT', 0.0))
+
+        except Exception as e:
+            return {'error_msg':'%s:%s' %(data.get('INTERNAL_PAY_TRANS_ID'), e)}
+
+        return {'payment_data': payment_data}
+
+    @api.multi
+    def run_connector_internal_payment(self):
+        '''
+           method to connect mssql and create internal payments
+        '''
+        for connector in self.sudo():
+            connection = False
+
+            if not connector.internal_payment_model:
+                if self._context.get('raise_error'):
+                    raise UserError(_("Please check the Payment Model"))
+                continue
+
+            try:
+                connection = pymssql.connect(connector.host, connector.username, connector.password, connector.db_name)
+                cursor = connection.cursor(as_dict=True)
+                select_query = 'SELECT TOP %s * FROM %s WHERE ODOO_IS_READ=0' %(connector.limit, connector.internal_payment_model)
+                cursor.execute(select_query)
+                cursor_data = cursor.fetchall()
+            except Exception as e:
+                if self._context.get('raise_error'):
+                    raise UserError(_("Connection Failed! Here is what we got instead:\n\n %s") % (e))
+                else:
+                    connector.register_log(model=connector.internal_payment_model, msg="Connection Failed! Here is what we got instead:\n\n %s" % (e))
+                    continue
+
+            if cursor_data and not 'INTERNAL_PAY_TRANS_ID' in cursor_data[0].keys():
+                warning = "INTERNAL_PAY_TRANS_ID not found in the model %s. Please check the Internal Payment Model" %(connector.internal_payment_model)
+                if self._context.get('raise_error'):
+                    raise UserError(_(warning))
+                connector.register_log(msg=warning)
+                continue
+
+            company_data = {}
+            for data in cursor_data:
+                if data.get('COMPANY_ID') not in company_data.keys():
+                    company_data[data.get('COMPANY_ID')] = [data]
+                else:
+                    company_data[data.get('COMPANY_ID')].append(data)
+
+            for company_id, data_value in company_data.items():
+                if connector.env.user.company_id.id != company_id:
+                    connector.env.user.company_id = company_id
+                for data in data_value:
+                    payment_data = connector.get_internal_payment_data(data)
+
+                    payment_vals = payment_data.get('payment_data', False)
+                    if payment_data.get('error_msg', False) and data.get('INTERNAL_PAY_TRANS_ID'):
+                        vals = (connector.internal_payment_model, payment_data.get('error_msg'), data.get('INTERNAL_PAY_TRANS_ID'))
+                        update_query  = "UPDATE %s set ODOO_READ_SUCCESS=0, ODOO_ERROR_MESSAGE='%s' where INTERNAL_PAY_TRANS_ID=%s" %vals
+                        connector.execute_update_query(connection, cursor, update_query, data.get('INTERNAL_PAY_TRANS_ID'), connector.internal_payment_model)
+                        connector.register_log(model=connector.internal_payment_model, msg='INTERNAL_PAY_TRANS_ID :%s \nMsg: %s \n\nData: %s' %(data.get('INTERNAL_PAY_TRANS_ID'), payment_data.get('error_msg'), data))
+                    elif payment_vals and data.get('INTERNAL_PAY_TRANS_ID'):
+                        try:
+                            payment = self.env['account.payment'].sudo().create(payment_vals)
+                            if data.get('RECIPIENT_CURRENCY_RATE'):
+                                currency_rate = self.env['res.currency.rate'].search([('currency_id.id', '=', data.get('RECIPIENT_CURRENCY_ID')), ('company_id.id', '=', payment.company_id.id), ('name', '=', payment.payment_date)])
+                                if currency_rate and currency_rate.rate != data.get('RECIPIENT_CURRENCY_RATE'):
+                                    currency_rate.rate = data.get('RECIPIENT_CURRENCY_RATE')
+                                elif not currency_rate:
+                                    currency_rate_id = self.env['res.currency.rate'].sudo().create({
+                                        'name': payment.payment_date,
+                                        'currency_id': data.get('RECIPIENT_CURRENCY_ID'),
+                                        'company_id': payment.company_id.id,
+                                        'rate': data.get('RECIPIENT_CURRENCY_RATE')
+                                    })
+                            payment.sudo().post()
+                            date_time_now = fields.Datetime.now()
+
+                            recipient_journal_name = ''
+                            recipient_journal = payment.move_line_ids.filtered(lambda r: r.full_reconcile_id and r.move_id.name != payment.move_name)
+                            if recipient_journal:
+                                recipient_journal_name = recipient_journal[0].move_id.name
+
+                            values = (connector.internal_payment_model, date_time_now, payment.move_name, recipient_journal_name, data.get('INTERNAL_PAY_TRANS_ID'))
+
+                            success_query = "UPDATE %s set ODOO_READ_SUCCESS=1, ODOO_IS_READ=1, ODOO_IS_READ_ON='%s', ODOO_PAYMENT_JOURNAL_REF='%s', ODOO_RECIPIENT_JOURNAL_REF='%s', ODOO_ERROR_MESSAGE='' where INTERNAL_PAY_TRANS_ID=%s;" %values
+                            connector.execute_update_query(connection, cursor, success_query, data.get('INTERNAL_PAY_TRANS_ID'), connector.internal_payment_model)
+
+
+                        except Exception as e:
+                            logging.error(e)
+                            msg = e and str(e).replace("'","")
+                            vals = (connector.internal_payment_model, msg, data.get('INTERNAL_PAY_TRANS_ID'))
+                            update_query  = "UPDATE %s set ODOO_READ_SUCCESS=0, ODOO_ERROR_MESSAGE='%s' where INTERNAL_PAY_TRANS_ID=%s" %vals
+                            connector.execute_update_query(connection, cursor, update_query, data.get('INTERNAL_PAY_TRANS_ID'), connector.internal_payment_model)
+                            connector.register_log(model=connector.internal_payment_model, msg='INTERNAL_PAY_TRANS_ID :%s \nMsg: %s \n\n Data: %s' %(data.get('INTERNAL_PAY_TRANS_ID'), msg, data))
+
+            if connection:
+                connection.close()
+        return True
+
+    @api.multi
+    def run_mssql_connector_internal_payment_cron(self):
+        '''
+            cron method to pull data for internal payments
+        '''
+        for connector in self.env['mssql.connector'].sudo().search([]):
+            connector.sudo().run_connector_internal_payment()
         return True
 
 

@@ -4,22 +4,25 @@
         <record id="connector_config_form_view" model="ir.ui.view">
             <field name="name">connector.config.form.view</field>
             <field name="model">mssql.connector</field>
-            <field name="arch" type="xml"> 
+            <field name="arch" type="xml">
                 <form>
                     <sheet>
                         <div class="oe_button_box" name="button_box">
-                                <button name="run_connector_invoice"  class="oe_stat_button" type="object" string="Create Invoice"
-                                    context="{'raise_error':True}"  icon="fa-book" 
+                                <button name="run_connector_invoice"  class="oe_stat_button" type="object" string="Create Invoices"
+                                    context="{'raise_error':True}"  icon="fa-book"
                                     attrs="{'invisible':[('active','=',False)]}"/>
                                 <button name="run_connector_payment"  class="oe_stat_button" type="object" string="Create Payments"
-                                    context="{'raise_error':True}"  icon="fa-dollar" 
+                                    context="{'raise_error':True}"  icon="fa-dollar"
                                      attrs="{'invisible':[('active','=',False)]}"/>
+                                <button name="run_connector_internal_payment"  class="oe_stat_button" type="object" string="Create Internal Payments"
+                                     context="{'raise_error':True}"  icon="fa-exchange"
+                                      attrs="{'invisible':[('active','=',False)]}"/>
                             <button name="toggle_active" type="object" class="oe_stat_button" icon="fa-archive">
                                 <field name="active" widget="boolean_button"/>
                             </button>
                         </div>
                         <group string="Connection Information">
-                            <group >  
+                            <group >
                                 <field name='host'/>
                                 <field name='db_name'/>
                                 <field name='limit'/>
@@ -27,10 +30,11 @@
                             <group>
                                 <field name='invoice_model'/>
                                 <field name='payment_model'/>
+                                <field name='internal_payment_model'/>
                             </group>
                         </group>
                         <group string="Security and Authentication">
-                            <group >  
+                            <group >
                                 <field name='username'/>
                                 <field name='password' password="True"/>
                                 <button name="test_mssql_connection" type="object" string="Test Connection" icon="fa-television"/>
@@ -39,7 +43,7 @@
                         </group>
                     </sheet>
                 </form>
-            </field>  
+            </field>
         </record>
 
         <record id="connector_config_tree_view" model="ir.ui.view">
@@ -78,12 +82,12 @@
                 <form create="false" edit="false" delete="false">
                     <sheet>
                         <group>
-                            <group >  
+                            <group >
                                 <field name='date'/>
                                 <field name='model_name'/>
                                 <field name='db_name'/>
                             </group>
-                            <group>  
+                            <group>
                                 <field name='connector_id'/>
                             </group>
                         </group>
@@ -92,7 +96,7 @@
                         </group>
                     </sheet>
                 </form>
-            </field>  
+            </field>
         </record>
 
 
