@@ -647,7 +647,7 @@ class MSSQLConnector(models.Model):
                         try:
                             payment = self.env['account.payment'].sudo().create(payment_vals)
                             if data.get('RECIPIENT_CURRENCY_RATE'):
-                                currency_rate = self.env['res.currency.rate'].search([('currency_id', '=', data.get('RECIPIENT_CURRENCY_ID')), ('company_id', '=', payment.company_id.id), ('name', '=', payment.payment_date)])
+                                currency_rate = self.env['res.currency.rate'].sudo().search([('currency_id', '=', data.get('RECIPIENT_CURRENCY_ID')), ('company_id', '=', payment.company_id.id), ('name', '=', payment.payment_date)])
                                 logging.error((data.get('RECIPIENT_CURRENCY_ID'),payment.company_id.id,payment.payment_date,currency_rate))
                                 if currency_rate and currency_rate.rate != data.get('RECIPIENT_CURRENCY_RATE'):
                                     currency_rate.rate = data.get('RECIPIENT_CURRENCY_RATE')
