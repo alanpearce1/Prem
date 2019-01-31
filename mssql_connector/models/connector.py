@@ -198,6 +198,7 @@ class MSSQLConnector(models.Model):
            method to log error on query execution
         '''
         self.ensure_one()
+        logging.error((self,model,msg))
         if msg:
             self.env['mssql.connector.log'].create({
                                         'connector_id':self.id,
@@ -646,7 +647,8 @@ class MSSQLConnector(models.Model):
                         try:
                             payment = self.env['account.payment'].sudo().create(payment_vals)
                             if data.get('RECIPIENT_CURRENCY_RATE'):
-                                currency_rate = self.env['res.currency.rate'].search([('currency_id.id', '=', data.get('RECIPIENT_CURRENCY_ID')), ('company_id.id', '=', payment.company_id.id), ('name', '=', payment.payment_date)])
+                                currency_rate = self.env['res.currency.rate'].search([('currency_id', '=', data.get('RECIPIENT_CURRENCY_ID')), ('company_id', '=', payment.company_id.id), ('name', '=', payment.payment_date)])
+                                logging.error((data.get('RECIPIENT_CURRENCY_ID'),payment.company_id.id,payment.payment_date,currency_rate))
                                 if currency_rate and currency_rate.rate != data.get('RECIPIENT_CURRENCY_RATE'):
                                     currency_rate.rate = data.get('RECIPIENT_CURRENCY_RATE')
                                 elif not currency_rate:
