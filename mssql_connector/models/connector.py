@@ -647,14 +647,13 @@ class MSSQLConnector(models.Model):
                         try:
                             payment = self.env['account.payment'].sudo().create(payment_vals)
                             if data.get('RECIPIENT_CURRENCY_RATE'):
-                                currency_rate = self.env['res.currency.rate'].sudo().search([('currency_id', '=', data.get('RECIPIENT_CURRENCY_ID')), ('company_id', '=', payment.company_id.id), ('name', '=', payment.payment_date)])
-                                logging.error((data.get('RECIPIENT_CURRENCY_ID'),payment.company_id.id,payment.payment_date,currency_rate))
+                                currency_rate = payment.sudo().currency_id.rate_ids.filtered(lambda rec: rec.company_id and rec.company_id.id == payment.company_id.id and rec.name == payment.payment_date)
                                 if currency_rate and currency_rate.rate != data.get('RECIPIENT_CURRENCY_RATE'):
                                     currency_rate.rate = data.get('RECIPIENT_CURRENCY_RATE')
                                 elif not currency_rate:
-                                    currency_rate_id = self.env['res.currency.rate'].sudo().create({
+                                    self.env['res.currency.rate'].sudo().create({
                                         'name': payment.payment_date,
-                                        'currency_id': data.get('RECIPIENT_CURRENCY_ID'),
+                                        'currency_id': payment.currency_id.id,
                                         'company_id': payment.company_id.id,
                                         'rate': data.get('RECIPIENT_CURRENCY_RATE')
                                     })
