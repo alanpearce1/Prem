@@ -759,7 +759,7 @@ class MSSQLConnector(models.Model):
                 payment_line_data['amount'] = abs(data.get('AMOUNT', 0.0))
 
         except Exception as e:
-            return {'error_msg':'%s:%s' %(data.get('INTERNAL_PAY_TRANS_ID'), e)}
+            return {'error_msg':'%s:%s' %(data.get('PAY_TRANS_ID'), e)}
 
         return {'payment_line_data': payment_line_data}
 
@@ -836,7 +836,7 @@ class MSSQLConnector(models.Model):
 
                             date_time_now = fields.Datetime.now()
                             values = (connector.payment_line_model, date_time_now,data.get('ODOO_JOURNAL_REF') , data.get('PAY_TRANS_ID'))
-                            success_query = "UPDATE %s set ODOO_READ_SUCCESS=1, ODOO_IS_READ=1, ODOO_IS_READ_ON='%s',ODOO_JOURNAL_REF='%s' , ODOO_ERROR_MESSAGE='' where INTERNAL_PAY_TRANS_ID=%s;" %values
+                            success_query = "UPDATE %s set ODOO_READ_SUCCESS=1, ODOO_IS_READ=1, ODOO_IS_READ_ON='%s',ODOO_JOURNAL_REF='%s' , ODOO_ERROR_MESSAGE='' where PAY_TRANS_ID=%s;" %values
                             connector.execute_update_query(connection, cursor, success_query, data.get('PAY_TRANS_ID'), connector.payment_line_model)
                         except Exception as e:
                             logging.error(e)
