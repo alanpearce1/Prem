@@ -826,17 +826,14 @@ class MSSQLConnector(models.Model):
                         connector.execute_update_query(connection, cursor, update_query, data.get('PAY_TRANS_ID'), connector.payment_line_model)
                         connector.register_log(model=connector.payment_line_model, msg='PAY_TRANS_ID :%s \nMsg: %s \n\nData: %s' %(data.get('PAY_TRANS_ID'), reconcile_data.get('error_msg'), data))
                     elif recocile_vals and data.get('PAY_TRANS_ID'):
-
                         try:
                             invoice = self.env['account.invoice'].sudo().browse(recocile_vals.get('invoice_id'))
                             line_to_reconcile = invoice.sudo().move_id.line_ids.filtered(lambda r: not r.reconciled and r.account_id.internal_type in ('payable', 'receivable'))
                             payment_move = self.env['account.move'].sudo().browse(recocile_vals.get('payment_id'))
                             payment_line = payment_move.sudo().line_ids.filtered(lambda r: not r.reconciled and r.account_id.internal_type in ('payable', 'receivable'))
                             (line_to_reconcile + payment_line).sudo().reconcile()
-
-                            date_time_now = fields.Datetime.now()
-                            values = (connector.payment_line_model, date_time_now,data.get('ODOO_JOURNAL_REF') , data.get('PAY_TRANS_ID'))
-                            success_query = "UPDATE %s set ODOO_READ_SUCCESS=1, ODOO_IS_READ=1, ODOO_IS_READ_ON='%s',ODOO_JOURNAL_REF='%s' , ODOO_ERROR_MESSAGE='' where PAY_TRANS_ID=%s;" %values
+                            values = (connector.payment_line_model, data.get('ODOO_JOURNAL_REF'), data.get('PAY_TRANS_ID'))
+                            success_query = "UPDATE %s set ODOO_READ_SUCCESS=1, ODOO_IS_READ=1, ODOO_JOURNAL_REF='%s' , ODOO_ERROR_MESSAGE='' where PAY_TRANS_ID=%s;" %values
                             connector.execute_update_query(connection, cursor, success_query, data.get('PAY_TRANS_ID'), connector.payment_line_model)
                         except Exception as e:
                             logging.error(e)
