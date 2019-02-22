@@ -46,5 +46,19 @@ model.run_mssql_connector_internal_payment_cron()
             <field name="doall" eval="False"/>
         </record>
 
+        <record model="ir.cron" id="ir_cron_payment_reconcilation">
+            <field name="name">PAYMENT RECONCILATION CRON</field>
+            <field name="model_id" ref="model_mssql_connector"/>
+            <field name="state">code</field>
+            <field name="code">
+model.run_mssql_connector_reconcile_cron()
+            </field>
+            <field name="active" eval="False"/>
+            <field name="user_id" ref="base.user_root"/>
+            <field name="interval_number">1</field>
+            <field name="interval_type">hours</field>
+            <field name="numbercall">-1</field>
+            <field name="doall" eval="False"/>
+        </record>
     </data>
 </odoo>

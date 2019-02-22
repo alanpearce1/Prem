@@ -34,7 +34,8 @@ class MSSQLConnector(models.Model):
     limit = fields.Integer(default=500, string='Limit', required=True)
     invoice_model = fields.Char(string='Invoice Model')
     payment_model = fields.Char(string='Payment Model')
-    internal_payment_model = fields.Char(string='Internal Payment Model')    
+    internal_payment_model = fields.Char(string='Internal Payment Model')
+    payment_line_model = fields.Char(string='Payment Line Model')
 
 
     @api.multi
@@ -653,7 +654,7 @@ class MSSQLConnector(models.Model):
                                 elif data.get('PAYMENT_CURRENCY_ID') != payment.company_id.currency_id.id:
                                     currency_id = data.get('PAYMENT_CURRENCY_ID')
 
-                                
+
                                 currency_rate = self.env['res.currency'].sudo().browse(currency_id).rate_ids.filtered(lambda rec: rec.company_id and rec.company_id.id == payment.company_id.id and rec.name == payment.payment_date)
                                 if currency_rate and currency_rate.rate != data.get('RECIPIENT_CURRENCY_RATE'):
                                     currency_rate.rate = data.get('RECIPIENT_CURRENCY_RATE')
@@ -697,6 +698,162 @@ class MSSQLConnector(models.Model):
         '''
         for connector in self.env['mssql.connector'].sudo().search([]):
             connector.sudo().run_connector_internal_payment()
+        return True
+
+
+
+
+
+    def get_reconcile_data(self, data):
+        """
+        Get the payment transaction line values
+
+        :rtype           : `dict`
+        :returns         : dictionary with keys payment_line_data or error_msg
+
+        """
+        if not data:
+            return {'error_msg': 'Data not found !'}
+
+        payment_line_data = {}
+        company = False
+
+        try:
+            # Company
+            if data.get('COMPANY_ID'):
+                payment_line_data['company_id'] = data.get('COMPANY_ID')
+                company = self.env['res.company'].sudo().browse([payment_line_data.get('company_id')])
+                if not company:
+                    return {'error_msg':'Invalid Company'}
+            else:
+                return {'error_msg':'Invalid Company'}
+
+            #PAY_TRANS_ID
+            if data.get('PAY_TRANS_ID'):
+                payment_line_data['PAY_TRANS_ID'] = data.get('PAY_TRANS_ID')
+            else:
+                return {'error_msg':'PAY_TRANS_ID Missing'}
+
+            # ODOO_JOURNAL_REF
+            if data.get('ODOO_JOURNAL_REF'):
+                payment = self.env['account.move'].sudo().search([('name', '=', data.get('ODOO_JOURNAL_REF')), ('company_id', '=', company.id), ('partner_id', '=', data.get('PARTNER_ID'))])
+                if payment:
+                    payment_line_data['payment_id'] = payment.id
+                else:
+                    return {'error_msg': 'Invalid ODOO_JOURNAL_REF with company'}
+            else:
+                return {'error_msg': 'Invalid ODOO_JOURNAL_REF'}
+
+            # TRANS_CROSS_REF
+            if data.get('TRANS_CROSS_REF'):
+                invoice = self.env['account.invoice'].sudo().search([('number', '=', data.get('TRANS_CROSS_REF')), ('company_id', '=', company.id), ('state', '=', 'open'), ('partner_id', '=', data.get('PARTNER_ID'))])
+                if invoice:
+                    payment_line_data['invoice_id'] = invoice.id
+                else:
+                    return {'error_msg': 'Invalid Invoice with company'}
+            else:
+                return {'error_msg': 'Invalid TRANS_CROSS_REF'}
+
+            #Amount
+            if data.get('AMOUNT'):
+                payment_line_data['amount'] = abs(data.get('AMOUNT', 0.0))
+
+        except Exception as e:
+            return {'error_msg':'%s:%s' %(data.get('INTERNAL_PAY_TRANS_ID'), e)}
+
+        return {'payment_line_data': payment_line_data}
+
+
+
+    @api.multi
+    def run_connector_reconcile(self):
+        '''
+           method to connect mssql and reconcile
+        '''
+
+        for connector in self.sudo():
+            connection = False
+
+            if not connector.payment_line_model:
+                if self._context.get('raise_error'):
+                    raise UserError(_("Please check the Payment Line Model"))
+                continue
+
+            try:
+                connection = pymssql.connect(connector.host, connector.username, connector.password, connector.db_name)
+                cursor = connection.cursor(as_dict=True)
+
+                columns = "ptl.PAY_TRANS_ID, pt.ODOO_JOURNAL_REF, pt.COMPANY_ID, ptl.TRANS_CROSS_REF, ptl.AMOUNT, pt.PARTNER_ID"
+                from_table = "PAYMENT_TRANS_LINES ptl left join PAYMENT_TRANS pt on ptl.PAY_TRANS_ID = pt.PAY_TRANS_ID"
+                where_condition = "pt.ODOO_IS_READ = 1 and pt.ODOO_READ_SUCCESS = 1 and ptl.ODOO_IS_READ = 0"
+                order_by = "ptl.PAY_TRANS_ID"
+                select_query = 'SELECT TOP %s %s FROM %s WHERE %s ORDER BY %s' %(connector.limit, columns, from_table, where_condition, order_by)
+                cursor.execute(select_query)
+                cursor_data = cursor.fetchall()
+            except Exception as e:
+                if self._context.get('raise_error'):
+                    raise UserError(_("Connection Failed! Here is what we got instead:\n\n %s") % (e))
+                else:
+                    connector.register_log(model=connector.payment_line_model, msg="Connection Failed! Here is what we got instead:\n\n %s" % (e))
+                    continue
+
+            if cursor_data and not 'PAY_TRANS_ID' in cursor_data[0].keys():
+                warning = "PAY_TRANS_ID not found in the model %s. Please check the Payment Line Model" %(connector.payment_line_model)
+                if self._context.get('raise_error'):
+                    raise UserError(_(warning))
+                connector.register_log(msg=warning)
+                continue
+
+            company_data = {}
+            for data in cursor_data:
+                if data.get('COMPANY_ID') not in company_data.keys():
+                    company_data[data.get('COMPANY_ID')]= [data]
+                else:
+                    company_data[data.get('COMPANY_ID')].append(data)
+
+            for company_id, data_value in company_data.items():
+                if connector.env.user.company_id.id != company_id:
+                    connector.env.user.company_id = company_id
+
+                for data in data_value:
+
+                    reconcile_data = connector.get_reconcile_data(data)
+                    recocile_vals = reconcile_data.get('payment_line_data')
+
+                    if reconcile_data.get('error_msg', False) and data.get('PAY_TRANS_ID'):
+                        vals = (connector.payment_line_model, reconcile_data.get('error_msg'), data.get('PAY_TRANS_ID'))
+                        update_query  = "UPDATE %s set ODOO_READ_SUCCESS=0, ODOO_ERROR_MESSAGE='%s' where PAY_TRANS_ID=%s" %vals
+                        connector.execute_update_query(connection, cursor, update_query, data.get('PAY_TRANS_ID'), connector.payment_line_model)
+                        connector.register_log(model=connector.payment_line_model, msg='PAY_TRANS_ID :%s \nMsg: %s \n\nData: %s' %(data.get('PAY_TRANS_ID'), reconcile_data.get('error_msg'), data))
+                    elif recocile_vals and data.get('PAY_TRANS_ID'):
+
+                        try:
+                            invoice = self.env['account.invoice'].sudo().browse(recocile_vals.get('invoice_id'))
+                            line_to_reconcile = invoice.sudo().move_id.line_ids.filtered(lambda r: not r.reconciled and r.account_id.internal_type in ('payable', 'receivable'))
+                            payment_move = self.env['account.move'].sudo().browse(recocile_vals.get('payment_id'))
+                            payment_line = payment_move.sudo().line_ids.filtered(lambda r: not r.reconciled and r.account_id.internal_type in ('payable', 'receivable'))
+                            (line_to_reconcile + payment_line).sudo().reconcile()
+
+                            date_time_now = fields.Datetime.now()
+                            values = (connector.payment_line_model, date_time_now,data.get('ODOO_JOURNAL_REF') , data.get('PAY_TRANS_ID'))
+                            success_query = "UPDATE %s set ODOO_READ_SUCCESS=1, ODOO_IS_READ=1, ODOO_IS_READ_ON='%s',ODOO_JOURNAL_REF='%s' , ODOO_ERROR_MESSAGE='' where INTERNAL_PAY_TRANS_ID=%s;" %values
+                            connector.execute_update_query(connection, cursor, success_query, data.get('PAY_TRANS_ID'), connector.payment_line_model)
+                        except Exception as e:
+                            logging.error(e)
+                            msg = e and str(e).replace("'","")
+                            vals = (connector.payment_line_model, msg, data.get('PAY_TRANS_ID'))
+                            update_query  = "UPDATE %s set ODOO_READ_SUCCESS=0, ODOO_ERROR_MESSAGE='%s' where PAY_TRANS_ID=%s" %vals
+                            connector.execute_update_query(connection, cursor, update_query, data.get('PAY_TRANS_ID'), connector.payment_line_model)
+                            connector.register_log(model=connector.payment_line_model, msg='PAY_TRANS_ID :%s \nMsg: %s \n\n Data: %s' %(data.get('PAY_TRANS_ID'), msg, data))
+
+
+    @api.model
+    def run_mssql_connector_reconcile_cron(self):
+        '''
+            cron method to pull data for reconcile
+        '''
+        for connector in self.env['mssql.connector'].sudo().search([]):
+            connector.sudo().run_connector_reconcile()
         return True
 
 
