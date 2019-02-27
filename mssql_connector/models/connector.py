@@ -835,7 +835,7 @@ class MSSQLConnector(models.Model):
 
                             if not invoice:
                                 values = (connector.payment_line_model, data.get('PAY_TRANS_ID'))
-                                update_query = "UPDATE %s set ODOO_READ_SUCCESS=1, ODOO_CANNOT_MATCH = 1,  ODOO_IS_READ=1, ODOO_JOURNAL_REF='' , ODOO_ERROR_MESSAGE='' where PAY_TRANS_ID=%s;" %values
+                                update_query = "UPDATE %s set ODOO_READ_SUCCESS=0, ODOO_CANNOT_MATCH=1, ODOO_IS_READ=1, ODOO_JOURNAL_REF='', ODOO_ERROR_MESSAGE='' where PAY_TRANS_ID=%s;" %values
 
                                 connector.execute_update_query(connection, cursor, update_query, data.get('PAY_TRANS_ID'), connector.payment_line_model)
                                 continue
@@ -846,7 +846,7 @@ class MSSQLConnector(models.Model):
                             payment_line = payment_move.sudo().line_ids.filtered(lambda r: not r.reconciled and r.account_id.internal_type in ('payable', 'receivable'))
                             (line_to_reconcile + payment_line).sudo().reconcile()
                             values = (connector.payment_line_model, data.get('ODOO_JOURNAL_REF'), data.get('PAY_TRANS_ID'))
-                            success_query = "UPDATE %s set ODOO_READ_SUCCESS=1, ODOO_IS_READ=1, ODOO_JOURNAL_REF='%s' , ODOO_ERROR_MESSAGE='' where PAY_TRANS_ID=%s;" %values
+                            success_query = "UPDATE %s set ODOO_READ_SUCCESS=1, ODOO_CANNOT_MATCH=0, ODOO_IS_READ=1, ODOO_JOURNAL_REF='%s', ODOO_ERROR_MESSAGE='' where PAY_TRANS_ID=%s;" %values
                             connector.execute_update_query(connection, cursor, success_query, data.get('PAY_TRANS_ID'), connector.payment_line_model)
                         except Exception as e:
                             logging.error(e)
