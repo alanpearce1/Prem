@@ -734,6 +734,12 @@ class MSSQLConnector(models.Model):
             else:
                 return {'error_msg':'PAY_TRANS_ID Missing'}
 
+            #PARTNER_ID
+            if data.get('PARTNER_ID'):
+                payment_line_data['PARTNER_ID'] = data.get('PARTNER_ID')
+            else:
+                return {'error_msg':'PARTNER_ID Missing'}
+
             # ODOO_JOURNAL_REF
             if data.get('ODOO_JOURNAL_REF'):
                 payment = self.env['account.move'].sudo().search([('name', '=', data.get('ODOO_JOURNAL_REF')), ('company_id', '=', company.id), ('partner_id', '=', data.get('PARTNER_ID'))])
@@ -746,11 +752,7 @@ class MSSQLConnector(models.Model):
 
             # TRANS_CROSS_REF
             if data.get('TRANS_CROSS_REF'):
-                invoice = self.env['account.invoice'].sudo().search([('number', '=', data.get('TRANS_CROSS_REF')), ('company_id', '=', company.id), ('state', '=', 'open'), ('partner_id', '=', data.get('PARTNER_ID'))])
-                if invoice:
-                    payment_line_data['invoice_id'] = invoice.id
-                else:
-                    return {'error_msg': 'Invalid Invoice with company'}
+                payment_line_data['invoice_id'] = data.get('TRANS_CROSS_REF')
             else:
                 return {'error_msg': 'Invalid TRANS_CROSS_REF'}
 
@@ -785,11 +787,12 @@ class MSSQLConnector(models.Model):
 
                 columns = "ptl.PAY_TRANS_ID, pt.ODOO_JOURNAL_REF, pt.COMPANY_ID, ptl.TRANS_CROSS_REF, ptl.AMOUNT, pt.PARTNER_ID"
                 from_table = "PAYMENT_TRANS_LINES ptl left join PAYMENT_TRANS pt on ptl.PAY_TRANS_ID = pt.PAY_TRANS_ID"
-                where_condition = "pt.ODOO_IS_READ = 1 and pt.ODOO_READ_SUCCESS = 1 and ptl.ODOO_IS_READ = 0"
+                where_condition = "pt.ODOO_IS_READ = 1 and pt.ODOO_READ_SUCCESS = 1 and ptl.ODOO_IS_READ = 0 and ptl.IS_INACTIVE <> 1"
                 order_by = "ptl.PAY_TRANS_ID"
                 select_query = 'SELECT TOP %s %s FROM %s WHERE %s ORDER BY %s' %(connector.limit, columns, from_table, where_condition, order_by)
                 cursor.execute(select_query)
                 cursor_data = cursor.fetchall()
+
             except Exception as e:
                 if self._context.get('raise_error'):
                     raise UserError(_("Connection Failed! Here is what we got instead:\n\n %s") % (e))
@@ -818,18 +821,28 @@ class MSSQLConnector(models.Model):
                 for data in data_value:
 
                     reconcile_data = connector.get_reconcile_data(data)
-                    recocile_vals = reconcile_data.get('payment_line_data')
+                    reconcile_vals = reconcile_data.get('payment_line_data')
 
                     if reconcile_data.get('error_msg', False) and data.get('PAY_TRANS_ID'):
                         vals = (connector.payment_line_model, reconcile_data.get('error_msg'), data.get('PAY_TRANS_ID'))
                         update_query  = "UPDATE %s set ODOO_READ_SUCCESS=0, ODOO_ERROR_MESSAGE='%s' where PAY_TRANS_ID=%s" %vals
                         connector.execute_update_query(connection, cursor, update_query, data.get('PAY_TRANS_ID'), connector.payment_line_model)
                         connector.register_log(model=connector.payment_line_model, msg='PAY_TRANS_ID :%s \nMsg: %s \n\nData: %s' %(data.get('PAY_TRANS_ID'), reconcile_data.get('error_msg'), data))
-                    elif recocile_vals and data.get('PAY_TRANS_ID'):
+                    elif reconcile_vals and data.get('PAY_TRANS_ID'):
                         try:
-                            invoice = self.env['account.invoice'].sudo().browse(recocile_vals.get('invoice_id'))
+
+                            invoice = self.env['account.invoice'].sudo().search([('number', '=', reconcile_vals.get('invoice_id')), ('company_id', '=', reconcile_vals.get('company_id')), ('state', '=', 'open'), ('partner_id', '=', reconcile_vals.get('PARTNER_ID'))])
+
+                            if not invoice:
+                                values = (connector.payment_line_model, data.get('PAY_TRANS_ID'))
+                                update_query = "UPDATE %s set ODOO_READ_SUCCESS=1, ODOO_CANNOT_MATCH = 1,  ODOO_IS_READ=1, ODOO_JOURNAL_REF='' , ODOO_ERROR_MESSAGE='' where PAY_TRANS_ID=%s;" %values
+
+                                connector.execute_update_query(connection, cursor, update_query, data.get('PAY_TRANS_ID'), connector.payment_line_model)
+                                continue
+
                             line_to_reconcile = invoice.sudo().move_id.line_ids.filtered(lambda r: not r.reconciled and r.account_id.internal_type in ('payable', 'receivable'))
-                            payment_move = self.env['account.move'].sudo().browse(recocile_vals.get('payment_id'))
+
+                            payment_move = self.env['account.move'].sudo().browse(reconcile_vals.get('payment_id'))
                             payment_line = payment_move.sudo().line_ids.filtered(lambda r: not r.reconciled and r.account_id.internal_type in ('payable', 'receivable'))
                             (line_to_reconcile + payment_line).sudo().reconcile()
                             values = (connector.payment_line_model, data.get('ODOO_JOURNAL_REF'), data.get('PAY_TRANS_ID'))
